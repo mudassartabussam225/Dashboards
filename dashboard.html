@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Instant Dashboard Pro</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Chart.js for visualizations -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Chart.js Data Labels Plugin -->
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0"></script>
+    <!-- SheetJS (xlsx) for parsing Excel and CSV files -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <!-- html2canvas for exporting -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <!-- SortableJS for drag-and-drop layouts -->
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
+    <!-- jsPDF for PDF generation -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        /* --- SECURITY: Disable Text Selection --- */
+        body { font-family: 'Inter', sans-serif; -webkit-user-select: none; -moz-user-select: none; -ms-user-select: none; user-select: none; }
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #1f2937; }
+        ::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: #6b7280; }
+        .file-input-button, .chart-card-header { cursor: pointer; }
+        .chart-container { position: relative; min-height: 350px; }
+        .loader { border-top-color: #3498db; -webkit-animation: spin 1s linear infinite; animation: spin 1s linear infinite; }
+        @-webkit-keyframes spin { 0% { -webkit-transform: rotate(0deg); } 100% { -webkit-transform: rotate(360deg); } }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .chart-edit-panel { max-height: 0; overflow: hidden; transition: max-height 0.5s ease-in-out; }
+        .chart-edit-panel.open { max-height: 300px; }
+        .sortable-ghost { background-color: #374151; opacity: 0.5; }
+        .chart-card { transition: transform 0.2s ease-in-out; }
+        #error-toast { transition: opacity 0.3s, transform 0.3s; }
+
+        /* Styles for PNG Export */
+        .exporting .chart-edit-panel select {
+            display: none; /* Hide the dropdown during export */
+        }
+        .exporting .chart-edit-panel div[data-export-content]::after {
+            content: attr(data-export-content); /* Display the text from the data attribute */
+            display: block;
+            width: 100%;
+            background-color: #4b5563;
+            color: #e5e7eb;
+            padding: 0.25rem;
+            border-radius: 0.25rem;
+            font-size: 0.875rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-200">
+
+    <div id="error-toast" class="hidden fixed top-5 right-5 bg-red-600 text-white p-4 rounded-lg shadow-lg z-50 max-w-sm">
+        <div class="flex items-start">
+            <div class="flex-shrink-0">
+                <svg class="h-6 w-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+            </div>
+            <div class="ml-3">
+                <p class="text-sm font-semibold">An error occurred</p>
+                <p id="error-message" class="text-sm mt-1"></p>
+            </div>
+            <button id="close-error-toast" class="ml-4 flex-shrink-0 text-white hover:text-gray-200">&times;</button>
+        </div>
+    </div>
+
+    <div id="app" class="flex flex-col min-h-screen">
+        <header class="bg-gray-800/80 backdrop-blur-sm border-b border-gray-700 sticky top-0 z-20">
+            <div class="container mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="flex items-center justify-between h-16">
+                    <div class="flex items-center space-x-3">
+                        <svg class="h-8 w-8 text-indigo-400" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/><path d="M11 3v4h4"/></svg>
+                        <div>
+                            <h1 class="text-lg font-bold text-white">Instant Dashboard Pro</h1>
+                            <p class="text-xs text-gray-400">by <a href="https://www.linkedin.com/in/muhammad-mudassar-tabussam-50882416/" target="_blank" rel="noopener noreferrer" class="text-indigo-400 hover:underline">Muhammad Mudassar Tabussam</a></p>
+                        </div>
+                    </div>
+                    <div id="file-info-container" class="hidden md:flex items-center space-x-2 text-sm">
+                        <span id="fileName" class="text-gray-400"></span>
+                        <button id="save-config-btn" title="Save dashboard as PDF" class="px-3 py-2 bg-blue-600 hover:bg-blue-700 rounded-md text-white font-semibold">Save PDF</button>
+                        <button id="export-button" title="Export dashboard as PNG" class="px-3 py-2 bg-green-600 hover:bg-green-700 rounded-md text-white font-semibold">Export PNG</button>
+                        <button id="reset-button" title="Load a new file" class="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 rounded-md text-white font-semibold">New File</button>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <div id="content-area" class="flex-grow">
+            <div id="upload-section" class="flex-grow flex items-center justify-center p-4 h-full"></div>
+            <div id="loading-spinner" class="hidden flex-grow flex items-center justify-center h-full">
+                 <div class="loader ease-linear rounded-full border-4 border-t-4 border-gray-600 h-12 w-12 mb-4"></div>
+            </div>
+            <main id="dashboard-section" class="hidden flex-grow">
+                <div class="flex flex-col lg:flex-row h-full">
+                    <aside id="sidebar" class="w-full lg:w-80 bg-gray-800/60 backdrop-blur-sm border-r border-gray-700 p-4 lg:p-6 lg:h-[calc(100vh-128px)] lg:sticky lg:top-16 overflow-y-auto">
+                        <div id="controls-wrapper"></div>
+                    </aside>
+                    <div id="main-content" class="flex-1 p-4 sm:p-6 lg:p-8">
+                        <div id="kpi-container" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8"></div>
+                        <div id="chart-grid" class="grid grid-cols-1 xl:grid-cols-2 gap-6"></div>
+                    </div>
+                </div>
+            </main>
+        </div>
+
+        <footer class="bg-gray-800/80 backdrop-blur-sm border-t border-gray-700 py-4"></footer>
+    </div>
+
+    <script>
+    document.addEventListener('DOMContentLoaded', () => new DashboardApp());
+
+    class DashboardApp {
+        state = { rawData: [], filteredData: [], headers: [], columnInfo: {}, chartConfigs: [], globalFilters: [], currentColorPalette: 'default' };
+        dom = {};
+        charts = {};
+        
+        constructor() { this.cacheDOMElements(); this.registerEventListeners(); this.setInitialUI(); Chart.register(ChartDataLabels); }
+        cacheDOMElements() { ['upload-section', 'dashboard-section', 'kpi-container', 'chart-grid', 'controls-wrapper', 'loading-spinner', 'fileName', 'file-info-container', 'reset-button', 'export-button', 'save-config-btn', 'error-toast', 'error-message', 'close-error-toast'].forEach(id => this.dom[id.replace(/-(\w)/g, (_, p1) => p1.toUpperCase())] = document.getElementById(id)); }
+        
+        registerEventListeners() {
+            this.dom.resetButton.addEventListener('click', () => this.resetApp());
+            this.dom.exportButton.addEventListener('click', () => this.exportDashboard('png'));
+            this.dom.saveConfigBtn.addEventListener('click', () => this.exportDashboard('pdf'));
+            this.dom.closeErrorToast.addEventListener('click', () => this.dom.errorToast.classList.add('hidden'));
+            
+            const dropArea = document.body;
+            ['dragenter','dragover','dragleave','drop'].forEach(eName=>dropArea.addEventListener(eName,e=>{e.preventDefault();e.stopPropagation();}));
+            dropArea.addEventListener('drop', e => { if (this.dom.uploadSection.style.display!=='none') { const f=document.getElementById('file-input'); f.files=e.dataTransfer.files; this.handleFile({target:f}); } });
+            
+            // --- SECURITY: Disable Right-Click & Dev Tools Shortcuts ---
+            document.addEventListener('contextmenu', e => e.preventDefault());
+            document.addEventListener('keydown', e => { if (e.key==='F12' || (e.ctrlKey&&e.shiftKey&&e.key.toUpperCase()==='I') || (e.ctrlKey&&e.key.toUpperCase()==='U')) e.preventDefault(); });
+
+            this.dom.controlsWrapper.addEventListener('change', e => this.handleControlsChange(e));
+            this.dom.controlsWrapper.addEventListener('click', e => this.handleControlsClick(e));
+            this.dom.chartGrid.addEventListener('click', e => this.handleChartGridClick(e));
+        }
+        
+        setInitialUI() {
+            this.dom.uploadSection.innerHTML = `<div class="w-full max-w-lg"><div class="bg-gray-800 border-2 border-dashed border-gray-600 rounded-xl p-8 text-center"><svg class="mx-auto h-12 w-12 text-gray-500" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg><h2 class="mt-4 text-xl font-semibold">Upload Data File</h2><p class="mt-2 text-sm text-gray-400">Drag & drop or click Excel/CSV.</p><div class="mt-6"><input type="file" id="file-input" class="hidden" accept=".csv,.xlsx,.xls"><label for="file-input" class="file-input-button inline-flex items-center px-5 py-3 rounded-md text-white bg-indigo-600 hover:bg-indigo-700">Select File</label></div></div></div>`;
+            document.getElementById('file-input').addEventListener('change', e => this.handleFile(e));
+            document.querySelector('footer').innerHTML = `<div class="container mx-auto px-4 text-center text-gray-400 text-sm space-y-1"><p>&copy; ${new Date().getFullYear()} All Rights Reserved.</p><p>Developed by Muhammad Mudassar Tabussam | <a href="https://www.linkedin.com/in/muhammad-mudassar-tabussam-50882416/" target="_blank" rel="noopener noreferrer" class="text-indigo-400 hover:underline">LinkedIn</a></p><p class="text-xs text-gray-500">${new Date().toLocaleDateString(undefined, { weekday:'long',year:'numeric',month:'long',day:'numeric' })}</p></div>`;
+        }
+        
+        handleFile(e) {
+            const file = e.target.files[0]; if (!file) return;
+            this.dom.uploadSection.style.display = 'none'; this.dom.loadingSpinner.style.display = 'flex';
+            const reader = new FileReader();
+            reader.onload = evt => {
+                try {
+                    const workbook = XLSX.read(new Uint8Array(evt.target.result), { type: 'array', cellDates: true });
+                    const jsonData = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { defval: null });
+                    if (!jsonData || jsonData.length === 0) throw new Error('File is empty or could not be read.');
+                    this.processData(jsonData, file.name);
+                } catch (error) { this.showError(error.message); } 
+                finally { this.dom.loadingSpinner.style.display = 'none'; }
+            };
+            reader.readAsArrayBuffer(file);
+        }
+        
+        processData(jsonData, fileName, fromConfig=false) {
+            this.state.rawData = jsonData;
+            this.state.headers = Object.keys(jsonData[0] || {});
+            this.analyzeColumns();
+            if (!fromConfig) { this.state.chartConfigs = []; this.state.globalFilters = []; }
+            this.renderFullDashboard(fileName);
+        }
+
+        analyzeColumns() {
+            this.state.columnInfo = {};
+            this.state.headers.forEach(h => {
+                const unique = new Set(this.state.rawData.map(r => r[h]));
+                let isNum = [...unique].every(v => v === null || v === '' || (typeof v !== 'object' && !isNaN(Number(v))));
+                this.state.columnInfo[h] = { type: isNum && unique.size > 1 ? 'numeric' : 'categorical', uniqueCount: unique.size, uniqueValues: [...unique].sort((a,b) => String(a).localeCompare(String(b))) };
+            });
+        }
+        
+        renderFullDashboard(fileName) {
+            if (this.dom.fileNameEl) this.dom.fileNameEl.textContent = fileName;
+            if (this.dom.fileInfoContainer) this.dom.fileInfoContainer.classList.remove('hidden');
+            if (this.dom.dashboardSection) this.dom.dashboardSection.classList.remove('hidden');
+            if (this.dom.uploadSection) this.dom.uploadSection.style.display = 'none';
+            
+            this.renderAllControls();
+            this.updateDashboard();
+            if(this.sortable) this.sortable.destroy();
+            this.sortable = new Sortable(this.dom.chartGrid, { animation: 150, ghostClass: 'sortable-ghost', onEnd: e => this.updateChartOrder(e) });
+        }
+        
+        updateDashboard() {
+            this.state.filteredData = this.state.globalFilters.length === 0 ? this.state.rawData : this.state.rawData.filter(row => this.state.globalFilters.every(f => row[f.column] == f.value));
+            this.renderKPIs();
+            this.dom.chartGrid.innerHTML = '';
+            this.state.chartConfigs.forEach(config => this.createChartElement(config));
+            this.state.chartConfigs.forEach(config => this.renderSingleChart(config.id));
+        }
+
+        handleControlsChange(e) {
+            const id = e.target.id;
+            if (id === 'global-filter-col') this.updateGlobalFilterValueOptions(e.target.value);
+            if (id === 'chart-type') this.toggleChartControls(e.target.value);
+            if (id === 'analyze-col') this.renderStatsSummary(e.target.value);
+            if (id === 'color-palette') this.updateColorPalette(e.target.value);
+        }
+        
+        handleControlsClick(e) {
+            const action = e.target.dataset.action;
+            if(!action) return;
+            if(action === 'add-chart') this.addChart();
+            if(action === 'add-global-filter') this.addGlobalFilterFromUI();
+            if(action === 'remove-global-filter') this.removeGlobalFilter(e.target.dataset.column, e.target.dataset.value);
+        }
+
+        handleChartGridClick(e) {
+            const target = e.target.closest('[data-action]');
+            if(target) {
+                const action = target.dataset.action;
+                const chartId = target.closest('.chart-card').id;
+                if(action === 'toggle-edit') this.toggleEditMode(chartId);
+                if(action === 'remove-chart') this.removeChart(chartId);
+                if(action.startsWith('update-')) {
+                    const [_, key] = action.split('-');
+                    this.updateChartConfig(chartId, key, target.value);
+                }
+            } else if (e.target.tagName === 'CANVAS') {
+                const chartId = e.target.closest('.chart-card').id;
+                const chart = this.charts[chartId];
+                const points = chart.getElementsAtEventForMode(e, 'nearest', { intersect: true }, true);
+                if (points.length) {
+                    const config = this.state.chartConfigs.find(c => c.id === chartId);
+                    if(config.type === 'scatter') return;
+                    this.addGlobalFilter(config.dimension, chart.data.labels[points[0].index]);
+                }
+            }
+        }
+
+        renderAllControls() {
+            const numOpts = this.state.headers.filter(h => this.state.columnInfo[h].type === 'numeric').map(h => `<option value="${h}">${h}</option>`).join('');
+            const catOpts = this.state.headers.filter(h => this.state.columnInfo[h].type === 'categorical').map(h => `<option value="${h}">${h}</option>`).join('');
+            this.dom.controlsWrapper.innerHTML = `
+                <div class="mb-6"><h3 class="text-md font-semibold mb-2">Global Filters</h3><div id="global-filters-list" class="space-y-2 mb-2"></div><div id="add-filter-controls" class="space-y-2"><div><select id="global-filter-col" class="w-full bg-gray-700 p-2 rounded">${catOpts}</select></div><div id="global-filter-value-container"></div></div></div>
+                <div class="mb-6 pt-6 border-t border-gray-700"><h3 class="text-md font-semibold mb-2">Add New Chart</h3><div class="space-y-2"><select id="chart-type" class="w-full bg-gray-700 p-2 rounded"><option>bar</option><option>line</option><option>pie</option><option>doughnut</option><option>scatter</option></select><div id="standard-controls"><select id="dimension" class="w-full bg-gray-700 p-2 rounded mt-2"><option value="">Dimension</option>${catOpts}</select><select id="measure" class="w-full bg-gray-700 p-2 rounded mt-2"><option value="">Measure (Count)</option>${numOpts}</select><select id="aggregation" class="w-full bg-gray-700 p-2 rounded mt-2"><option value="sum">Sum</option><option value="avg">Average</option><option value="count">Count</option></select></div><div id="scatter-controls" class="hidden"><select id="x-axis" class="w-full bg-gray-700 p-2 rounded mt-2">${numOpts}</select><select id="y-axis" class="w-full bg-gray-700 p-2 rounded mt-2">${numOpts}</select></div><button data-action="add-chart" class="w-full mt-4 px-4 py-2 bg-indigo-600 rounded">Add Chart</button></div></div>
+                <div class="mb-6 pt-6 border-t border-gray-700"><h3 class="text-md font-semibold mb-2">Analyze Column</h3><select id="analyze-col" class="w-full bg-gray-700 p-2 rounded"><option value="">Select numeric column...</option>${numOpts}</select><div id="stats-summary-card" class="mt-2"></div></div>
+                <div class="pt-6 border-t border-gray-700"><h3 class="text-md font-semibold mb-2">Settings</h3><label class="block text-sm">Color Palette</label><select id="color-palette" class="w-full bg-gray-700 p-2 rounded"><option value="default">Default</option><option value="cool">Cool</option><option value="warm">Warm</option><option value="pastel">Pastel</option></select></div>`;
+            this.renderGlobalFiltersUI();
+            document.getElementById('global-filter-col').dispatchEvent(new Event('change'));
+        }
+
+        addChart() {
+            const id = `chart-${Date.now()}`;
+            const type = document.getElementById('chart-type').value;
+            let config;
+            if (type === 'scatter') {
+                const xAxis = document.getElementById('x-axis').value, yAxis = document.getElementById('y-axis').value;
+                if (!xAxis || !yAxis) return this.showError('Both X and Y axis must be selected for scatter plots.');
+                config = { id, type, xAxis, yAxis };
+            } else {
+                const dimension = document.getElementById('dimension').value;
+                if (!dimension) return this.showError('A dimension must be selected.');
+                const isCrowded = this.state.columnInfo[dimension].uniqueCount > 20;
+                config = { id, type, dimension, measure: document.getElementById('measure').value, aggregation: document.getElementById('aggregation').value, sort: 'desc', topN: isCrowded ? '10' : 'all' };
+            }
+            this.state.chartConfigs.push(config);
+            this.createChartElement(config);
+            this.renderSingleChart(id);
+        }
+
+        removeChart(id) {
+            if (this.charts[id]) { this.charts[id].destroy(); delete this.charts[id]; }
+            this.state.chartConfigs = this.state.chartConfigs.filter(c => c.id !== id);
+            document.getElementById(id)?.remove();
+        }
+
+        createChartElement(config) {
+            const el = document.createElement('div');
+            el.id = config.id;
+            el.className = "bg-gray-800 rounded-xl p-4 shadow-lg flex flex-col chart-card";
+            el.innerHTML = `
+                <div class="flex justify-between items-start gap-2 chart-card-header">
+                    <h3 id="${config.id}-title" class="text-md font-semibold text-white mb-2 flex-1"></h3>
+                    <div class="flex items-center gap-2"><button data-action="toggle-edit" class="text-gray-500 hover:text-white" title="Edit Chart"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="pointer-events:none;"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button><button data-action="remove-chart" class="text-gray-500 hover:text-white" title="Remove Chart"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="pointer-events:none;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
+                </div>
+                <div id="${config.id}-edit-panel" class="chart-edit-panel border-t border-b border-gray-700 my-2 py-4"></div>
+                <div class="chart-container flex-grow" style="overflow-y: hidden;"><canvas id="${config.id}-canvas"></canvas></div>
+                <div id="${config.id}-analysis" class="mt-4 pt-4 border-t border-gray-700 text-gray-400 text-xs"></div>`;
+            this.dom.chartGrid.appendChild(el);
+        }
+
+        renderSingleChart(id) {
+            const config = this.state.chartConfigs.find(c => c.id === id); if (!config) return;
+            const { title, data, analysis } = this.getChartDataFromConfig(config);
+            const titleEl = document.getElementById(`${id}-title`);
+            const analysisEl = document.getElementById(`${id}-analysis`);
+            if(titleEl) titleEl.textContent = title;
+            if(analysisEl) analysisEl.innerHTML = analysis;
+            
+            const container = document.getElementById(id)?.querySelector('.chart-container');
+            if(!container) return;
+            const ctx = document.getElementById(`${id}-canvas`).getContext('2d');
+            if (this.charts[id]) this.charts[id].destroy();
+
+            const options = { responsive: true, maintainAspectRatio: false, plugins: { legend: { display:['pie','doughnut'].includes(config.type), position:'bottom' }, datalabels: { display: c => ['bar','pie','doughnut'].includes(c.chart.config.type), anchor:'end', align:'end', color:'white', font:{weight:'bold',size:10}, formatter:(v,c) => { if (['pie','doughnut'].includes(c.chart.config.type)) { const sum = c.chart.data.datasets[0].data.reduce((a,b)=>a+b,0); return sum > 0 ? (v*100/sum).toFixed(1)+"%" : "0%"; } return v>=1e6?(v/1e6).toFixed(1)+'M':v>=1e3?(v/1e3).toFixed(1)+'K':v; } } } };
+            
+            if (config.type === 'bar' && data.labels.length > 25) {
+                options.indexAxis = 'y';
+                container.style.height = `${Math.max(350, data.labels.length * 20)}px`; container.style.overflowY = 'auto';
+            } else { container.style.height = ''; container.style.overflowY = 'hidden'; }
+            
+            this.charts[id] = new Chart(ctx, { type: config.type, data, options });
+        }
+
+        getChartDataFromConfig(config) {
+            const data = this.state.filteredData;
+            let title = '', chartData = {labels: [], datasets: []}, analysis = '';
+
+            try {
+                if (config.type === 'scatter') {
+                    const points = data.map(r=>({x:parseFloat(r[config.xAxis]),y:parseFloat(r[config.yAxis])})).filter(p=>!isNaN(p.x)&&!isNaN(p.y));
+                    title = `Correlation: ${config.yAxis} vs ${config.xAxis}`;
+                    chartData = { datasets: [{ label: title, data: points, backgroundColor: this.getColors(1)[0] }] };
+                    analysis = `<p>Visualizes relationship between <strong>${config.xAxis}</strong> and <strong>${config.yAxis}</strong> for ${points.length} points.</p>`;
+                } else {
+                    let grouped;
+                    if(config.measure) {
+                        const groups = data.reduce((acc, row) => {
+                            const cat = row[config.dimension] || 'N/A';
+                            const val = parseFloat(row[config.measure]);
+                            if(!isNaN(val)) { acc[cat] = acc[cat] || { total: 0, count: 0 }; acc[cat].total += val; acc[cat].count++; }
+                            return acc;
+                        }, {});
+                        grouped = Object.fromEntries(Object.entries(groups).map(([k,v]) => [k, config.aggregation==='avg'?v.total/v.count : config.aggregation==='count'?v.count : v.total]));
+                    } else {
+                        grouped = data.reduce((acc, row) => { const cat = row[config.dimension] || 'N/A'; acc[cat] = (acc[cat] || 0) + 1; return acc; }, {});
+                    }
+
+                    let items = Object.entries(grouped).map(([label, value])=>({label, value}));
+                    items.sort((a,b) => config.sort === 'desc' ? b.value - a.value : a.value - b.value);
+                    if (config.topN !== 'all') items = items.slice(0, parseInt(config.topN));
+
+                    let labels = items.map(d=>d.label);
+                    const values = items.map(d=>d.value);
+
+                    const maxLabelLength = 15;
+                    labels = labels.map(label => {
+                        const strLabel = String(label);
+                        if (strLabel.length > maxLabelLength) {
+                            const words = strLabel.split(' ');
+                            const lines = [];
+                            let currentLine = '';
+                            words.forEach(word => {
+                                if ((currentLine + word).length > maxLabelLength) {
+                                    lines.push(currentLine.trim());
+                                    currentLine = word + ' ';
+                                } else {
+                                    currentLine += word + ' ';
+                                }
+                            });
+                            lines.push(currentLine.trim());
+                            return lines.filter(l => l.length > 0);
+                        }
+                        return strLabel;
+                    });
+                    
+                    title = config.measure ? `${config.aggregation} of ${config.measure} by ${config.dimension}` : `Distribution of ${config.dimension}`;
+                    chartData = { labels, datasets: [{ label: title, data: values, backgroundColor: this.getColors(labels.length) }] };
+                    analysis = items.length ? `<p><strong>${items[0].label}</strong> has the highest value (${items[0].value.toLocaleString()}).</p>` : '<p>No data to analyze.</p>';
+                }
+            } catch (error) {
+                this.showError(`Chart Error: ${error.message}`);
+            }
+            return { title, data: chartData, analysis };
+        }
+        
+        addGlobalFilter(column, value) { if (!this.state.globalFilters.some(f => f.column === column && f.value == value)) { this.state.globalFilters.push({ column, value }); this.renderGlobalFiltersUI(); this.updateDashboard(); } }
+        removeGlobalFilter(column, value) { this.state.globalFilters = this.state.globalFilters.filter(f => !(f.column === column && f.value == value)); this.renderGlobalFiltersUI(); this.updateDashboard(); }
+        renderGlobalFiltersUI() { const list = document.getElementById('global-filters-list'); if(list) list.innerHTML = this.state.globalFilters.map(f => `<div class="flex justify-between items-center bg-gray-700 p-1 rounded text-sm"><span><strong>${f.column}</strong>: ${f.value}</span><button data-action="remove-global-filter" data-column="${f.column}" data-value="${f.value}" class="text-red-400 hover:text-red-300">✖</button></div>`).join(''); }
+        updateGlobalFilterValueOptions(col) { const {uniqueValues} = this.state.columnInfo[col]; const container = document.getElementById('global-filter-value-container'); if(container) container.innerHTML=`<div class="flex gap-2 mt-2"><select id="global-filter-val" class="w-full bg-gray-700 p-2 rounded">${uniqueValues.map(v=>`<option value="${v}">${v}</option>`).join('')}</select><button data-action="add-global-filter" class="px-4 bg-indigo-600 rounded">Add</button></div>`; }
+        addGlobalFilterFromUI() { const col = document.getElementById('global-filter-col').value; const val = document.getElementById('global-filter-val').value; this.addGlobalFilter(col, val); }
+        renderKPIs() { if (!this.dom.kpiContainer) return; const num = this.state.headers.filter(h=>this.state.columnInfo[h].type==='numeric').length; this.dom.kpiContainer.innerHTML = [{t:'Total Rows',v:this.state.filteredData.length},{t:'Columns',v:this.state.headers.length},{t:'Numeric Fields',v:num},{t:'Categorical Fields',v:this.state.headers.length-num}].map(k=>`<div class="bg-gray-800 rounded-xl p-4"><h3 class="text-sm text-gray-400">${k.t}</h3><p class="text-3xl font-semibold">${k.v.toLocaleString()}</p></div>`).join(''); }
+        toggleEditMode(id) { const panel = document.getElementById(`${id}-edit-panel`); if(panel) { panel.classList.toggle('open'); panel.innerHTML = panel.classList.contains('open') ? this.generateEditPanelHTML(id) : ''; } }
+        
+        generateEditPanelHTML(id) {
+            const config = this.state.chartConfigs.find(c => c.id === id);
+            if (!config) return '';
+
+            const types = ['bar', 'line', 'pie', 'doughnut', 'scatter'];
+            const typeOpts = types.map(t => `<option value="${t}" ${config.type === t ? 'selected' : ''}>${t.charAt(0).toUpperCase() + t.slice(1)}</option>`).join('');
+
+            if (config.type === 'scatter') {
+                const xAxisOpts = this.state.headers.filter(h => this.state.columnInfo[h].type === 'numeric').map(h => `<option value="${h}" ${config.xAxis === h ? 'selected' : ''}>${h}</option>`).join('');
+                const yAxisOpts = this.state.headers.filter(h => this.state.columnInfo[h].type === 'numeric').map(h => `<option value="${h}" ${config.yAxis === h ? 'selected' : ''}>${h}</option>`).join('');
+                return `
+                    <div class="grid grid-cols-2 gap-2 text-sm">
+                        <div><label>Type</label><select data-action="update-type" class="w-full bg-gray-600 p-1 rounded">${typeOpts}</select></div>
+                        <div></div>
+                        <div><label>X-Axis</label><select data-action="update-xAxis" class="w-full bg-gray-600 p-1 rounded">${xAxisOpts}</select></div>
+                        <div><label>Y-Axis</label><select data-action="update-yAxis" class="w-full bg-gray-600 p-1 rounded">${yAxisOpts}</select></div>
+                    </div>`;
+            }
+
+            const numOpts = this.state.headers.filter(h => this.state.columnInfo[h].type === 'numeric').map(h => `<option value="${h}" ${config.measure === h ? 'selected' : ''}>${h}</option>`).join('');
+            const catOpts = this.state.headers.filter(h => this.state.columnInfo[h].type === 'categorical').map(h => `<option value="${h}" ${config.dimension === h ? 'selected' : ''}>${h}</option>`).join('');
+            const aggOpts = ['sum', 'avg', 'count'].map(a => `<option value="${a}" ${config.aggregation === a ? 'selected' : ''}>${a}</option>`).join('');
+            const sortOpts = ['desc', 'asc'].map(s => `<option value="${s}" ${config.sort === s ? 'selected' : ''}>${s}</option>`).join('');
+            const topNOpts = ['all', '5', '10', '20'].map(n => `<option value="${n}" ${config.topN === n ? 'selected' : ''}>${n === 'all' ? 'All' : `Top ${n}`}</option>`).join('');
+
+            return `
+                <div class="grid grid-cols-2 gap-2 text-sm">
+                    <div><label>Type</label><select data-action="update-type" class="w-full bg-gray-600 p-1 rounded">${typeOpts}</select></div>
+                    <div><label>Dimension</label><select data-action="update-dimension" class="w-full bg-gray-600 p-1 rounded">${catOpts}</select></div>
+                    <div><label>Measure</label><select data-action="update-measure" class="w-full bg-gray-600 p-1 rounded"><option value="">Count</option>${numOpts}</select></div>
+                    <div><label>Aggregation</label><select data-action="update-aggregation" class="w-full bg-gray-600 p-1 rounded">${aggOpts}</select></div>
+                    <div><label>Sort</label><select data-action="update-sort" class="w-full bg-gray-600 p-1 rounded">${sortOpts}</select></div>
+                    <div><label>Show</label><select data-action="update-topN" class="w-full bg-gray-600 p-1 rounded">${topNOpts}</select></div>
+                </div>`;
+        }
+        
+        updateChartConfig(id, key, value) {
+            const index = this.state.chartConfigs.findIndex(c => c.id === id);
+            if (index === -1) return;
+
+            const oldConfig = { ...this.state.chartConfigs[index] };
+            let newConfig = { ...oldConfig, [key]: value };
+
+            if (key === 'type' && value !== oldConfig.type) {
+                if (value === 'scatter') {
+                    const numerics = this.state.headers.filter(h => this.state.columnInfo[h].type === 'numeric');
+                    newConfig = { id, type: 'scatter', xAxis: oldConfig.xAxis || numerics[0] || '', yAxis: oldConfig.yAxis || numerics[1] || numerics[0] || '' };
+                } else if (oldConfig.type === 'scatter') {
+                    const categoricals = this.state.headers.filter(h => this.state.columnInfo[h].type === 'categorical');
+                    newConfig = { id, type: value, dimension: oldConfig.dimension || categoricals[0] || '', measure: '', aggregation: 'sum', sort: 'desc', topN: 'all' };
+                }
+            }
+
+            this.state.chartConfigs[index] = newConfig;
+            
+            if (key === 'type' && value !== oldConfig.type) {
+                const panel = document.getElementById(`${id}-edit-panel`);
+                if(panel && panel.classList.contains('open')) {
+                    panel.innerHTML = this.generateEditPanelHTML(id);
+                }
+            }
+
+            this.renderSingleChart(id);
+        }
+
+        getColors(count) { const palettes = { default: [[75, 192, 192], [54, 162, 235], [255, 206, 86], [255, 99, 132], [153, 102, 255]], cool: [[54, 162, 235], [75, 192, 192], [153, 102, 255]], warm: [[255, 99, 132], [255, 159, 64], [255, 206, 86]], pastel: [[179, 229, 252], [179, 205, 224], [253, 205, 172]] }; const base = palettes[this.state.currentColorPalette] || palettes.default; return Array.from({length:count}, (_,i) => `rgba(${base[i%base.length].join(',')}, 0.7)`); }
+        updateColorPalette(name) { this.state.currentColorPalette=name; this.updateDashboard(); }
+        updateChartOrder(e) { const item = this.state.chartConfigs.splice(e.oldIndex, 1)[0]; this.state.chartConfigs.splice(e.newIndex, 0, item); }
+        renderStatsSummary(col) { const card = document.getElementById('stats-summary-card'); if (!col || !card) { card.innerHTML=''; return; } const values=this.state.filteredData.map(r=>parseFloat(r[col])).filter(v=>!isNaN(v)); if(values.length === 0) { card.innerHTML = '<div class="bg-gray-700 p-2 rounded mt-2 text-sm">No numeric data to analyze.</div>'; return; } const sum=values.reduce((a,b)=>a+b,0), mean=(sum/values.length).toFixed(2); values.sort((a,b)=>a-b); const median=(values.length%2===0 ? (values[values.length/2-1]+values[values.length/2])/2 : values[Math.floor(values.length/2)]).toFixed(2); card.innerHTML=`<div class="bg-gray-700 p-2 rounded mt-2 text-sm"><div>Mean: ${mean}</div><div>Median: ${median}</div><div>Min: ${Math.min(...values)}</div><div>Max: ${Math.max(...values)}</div></div>`; }
+        
+        async exportDashboard(format) {
+            const mainContent = document.getElementById('main-content');
+            const button = format === 'pdf' ? this.dom.saveConfigBtn : this.dom.exportButton;
+            const originalText = button.textContent;
+            button.textContent = '...';
+            button.disabled = true;
+
+            const openPanels = document.querySelectorAll('.chart-edit-panel.open');
+            openPanels.forEach(panel => {
+                panel.querySelectorAll('select').forEach(select => {
+                    const label = select.parentElement.querySelector('label');
+                    const selectedText = select.options[select.selectedIndex].text;
+                    const parentDiv = select.parentElement;
+                    if (label && parentDiv) {
+                        parentDiv.setAttribute('data-export-content', `${selectedText}`);
+                    }
+                });
+            });
+            mainContent.classList.add('exporting');
+
+            try {
+                const canvas = await html2canvas(mainContent, { backgroundColor: '#111827', scale: 2, useCORS: true });
+                if (format === 'pdf') {
+                    const imgData = canvas.toDataURL('image/png');
+                    const { jsPDF } = window.jspdf;
+                    const pdf = new jsPDF({ orientation: canvas.width > canvas.height ? 'landscape' : 'portrait', unit: 'px', format: [canvas.width, canvas.height] });
+                    pdf.addImage(imgData, 'PNG', 0, 0, pdf.internal.pageSize.getWidth(), pdf.internal.pageSize.getHeight());
+                    pdf.save(`dashboard-${Date.now()}.pdf`);
+                } else {
+                    const link = document.createElement('a');
+                    link.href = canvas.toDataURL('image/png');
+                    link.download = `dashboard-${Date.now()}.png`;
+                    link.click();
+                }
+            } catch (error) {
+                this.showError(`Export failed: ${error.message}`);
+            } finally {
+                mainContent.classList.remove('exporting');
+                 openPanels.forEach(panel => {
+                    panel.querySelectorAll('div[data-export-content]').forEach(div => div.removeAttribute('data-export-content'));
+                });
+                button.textContent = originalText;
+                button.disabled = false;
+            }
+        }
+        
+        showError(msg) {
+            alert(`An error occurred during file processing:\n\n${msg}`);
+            // Always reset the UI to a safe state
+            this.dom.uploadSection.style.display = 'flex';
+            this.dom.dashboardSection.classList.add('hidden');
+            this.dom.fileInfoContainer.classList.add('hidden');
+            this.dom.loadingSpinner.style.display = 'none';
+        }
+
+        toggleChartControls(type) { document.getElementById('standard-controls').classList.toggle('hidden',type==='scatter'); document.getElementById('scatter-controls').classList.toggle('hidden',type!=='scatter'); }
+        resetApp() { window.location.reload(); }
+    }
+    </script>
+</body>
+</html>
+
