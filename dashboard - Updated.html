@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Instant Dashboard Pro</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Chart.js for visualizations -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Chart.js Data Labels Plugin -->
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0"></script>
+    <!-- SheetJS (xlsx) for parsing Excel and CSV files -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <!-- html2canvas for exporting -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <!-- SortableJS for drag-and-drop layouts -->
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
+    <!-- jsPDF for PDF generation -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; -webkit-user-select: none; -moz-user-select: none; -ms-user-select: none; user-select: none; }
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #1f2937; }
+        ::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: #6b7280; }
+        .file-input-button, .chart-card-header { cursor: pointer; }
+        .chart-container { position: relative; min-height: 350px; }
+        .spinner { border-top-color: #4f46e5; -webkit-animation: spin 1s linear infinite; animation: spin 1s linear infinite; }
+        @-webkit-keyframes spin { 0% { -webkit-transform: rotate(0deg); } 100% { -webkit-transform: rotate(360deg); } }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .chart-edit-panel { max-height: 0; overflow: hidden; transition: max-height 0.5s ease-in-out; }
+        .chart-edit-panel.open { max-height: 350px; }
+        .sortable-ghost { background-color: #374151; opacity: 0.5; }
+        .chart-card { transition: transform 0.2s ease-in-out; }
+        #error-toast { transition: opacity 0.3s, transform 0.3s; }
+        .exporting .chart-card-header button, .exporting .chart-edit-panel { display: none; }
+        .exporting .export-info { display: block !important; }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-200">
+
+    <!-- Error Toast -->
+    <div id="error-toast" class="hidden fixed top-5 right-5 bg-red-600 text-white p-4 rounded-lg shadow-lg z-50 max-w-sm"></div>
+
+    <!-- Sheet Selector Modal -->
+    <div id="sheet-selector-modal" class="hidden fixed inset-0 bg-gray-900 bg-opacity-80 flex items-center justify-center z-40">
+        <div class="bg-gray-800 rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col">
+            <div class="p-6 border-b border-gray-700">
+                <h2 class="text-2xl font-bold text-white">Select a Sheet</h2>
+                <p class="text-gray-400 mt-1">We've analyzed your file. Choose the sheet you'd like to build a dashboard from.</p>
+            </div>
+            <div id="sheet-list" class="p-6 overflow-y-auto space-y-4"></div>
+        </div>
+    </div>
+
+    <!-- Main Application Wrapper -->
+    <div id="app" class="flex flex-col min-h-screen">
+        <header class="bg-gray-800/80 backdrop-blur-sm border-b border-gray-700 sticky top-0 z-20"></header>
+        
+        <div id="content-area" class="flex-grow flex">
+            <div id="upload-section" class="flex-grow flex items-center justify-center p-4"></div>
+            <div id="loading-spinner" class="hidden flex-grow flex items-center justify-center"></div>
+            <main id="dashboard-section" class="hidden flex-grow w-full">
+                <div class="flex flex-col lg:flex-row h-full w-full">
+                    <aside id="sidebar" class="w-full lg:w-80 bg-gray-800/60 backdrop-blur-sm border-r border-gray-700 p-4 lg:p-6 lg:h-[calc(100vh-128px)] lg:sticky lg:top-16 overflow-y-auto">
+                        <div id="controls-wrapper"></div>
+                    </aside>
+                    <div id="main-content" class="flex-1 p-4 sm:p-6 lg:p-8">
+                        <div id="kpi-container" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8"></div>
+                        <div id="chart-grid" class="grid grid-cols-1 xl:grid-cols-2 gap-6"></div>
+                    </div>
+                </div>
+            </main>
+        </div>
+        
+        <footer class="bg-gray-800/80 backdrop-blur-sm border-t border-gray-700 py-4"></footer>
+    </div>
+
+    <script>
+    let dashboardAppInstance;
+    function handleSheetSelection(index) {
+        if (dashboardAppInstance) dashboardAppInstance.processSheetSelection(index);
+        else console.error("Dashboard App instance not found.");
+    }
+    
+    document.addEventListener('DOMContentLoaded', () => {
+        dashboardAppInstance = new DashboardApp();
+    });
+
+    class DashboardApp {
+        state = { rawData: [], filteredData: [], headers: [], columnInfo: {}, chartConfigs: [], globalFilters: [], currentColorPalette: 'default', fileName: '' };
+        dom = {};
+        charts = {};
+        sortable = null;
+        workbook = null;
+
+        constructor() {
+            this.cacheDOMElements();
+            this.registerEventListeners();
+            this.setInitialUI();
+            Chart.register(ChartDataLabels);
+        }
+
+        cacheDOMElements() {
+            const ids = ['upload-section', 'dashboard-section', 'kpi-container', 'chart-grid', 'controls-wrapper', 'loading-spinner', 'error-toast', 'sheet-selector-modal', 'sheet-list'];
+            ids.forEach(id => this.dom[id.replace(/-(\w)/g, (_, p1) => p1.toUpperCase())] = document.getElementById(id));
+        }
+
+        registerEventListeners() {
+            document.querySelector('header').addEventListener('click', e => {
+                const target = e.target.closest('button');
+                if (!target) return;
+                switch(target.id) {
+                    case 'reset-button': this.resetApp(); break;
+                    case 'export-button': this.exportDashboard('png'); break;
+                    case 'save-config-btn': this.exportDashboard('pdf'); break;
+                }
+            });
+            this.dom.errorToast.addEventListener('click', e => { if (e.target.closest('[data-action="close-error-toast"]')) this.dom.errorToast.classList.add('hidden'); });
+            this.dom.controlsWrapper.addEventListener('change', e => this.handleControlsChange(e));
+            this.dom.controlsWrapper.addEventListener('click', e => this.handleControlsClick(e));
+            this.dom.chartGrid.addEventListener('click', e => this.handleChartGridClick(e));
+
+            const dropArea = document.body;
+            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => dropArea.addEventListener(eventName, e => { e.preventDefault(); e.stopPropagation(); }, false));
+            dropArea.addEventListener('drop', e => {
+                const fileInput = document.getElementById('file-input');
+                if (fileInput && e.dataTransfer.files.length > 0 && !this.workbook) { fileInput.files = e.dataTransfer.files; this.handleFile({ target: fileInput }); }
+            });
+            
+            document.addEventListener('contextmenu', e => e.preventDefault());
+            document.addEventListener('keydown', e => { if (e.key==='F12' || (e.ctrlKey&&e.shiftKey&&(e.key==='I'||e.key==='i')) || (e.ctrlKey&&(e.key==='U'||e.key==='u'))) e.preventDefault(); });
+        }
+
+        setInitialUI() {
+            document.querySelector('header').innerHTML = `<div class="container mx-auto px-4 sm:px-6 lg:px-8"><div class="flex items-center justify-between h-16"><div class="flex items-center space-x-3"><svg class="h-8 w-8 text-indigo-400" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/><path d="M11 3v4h4"/></svg><div><h1 class="text-lg font-bold text-white">Instant Dashboard Pro</h1><p class="text-xs text-gray-400">by <a href="https://www.linkedin.com/in/muhammad-mudassar-tabussam-50882416/" target="_blank" rel="noopener noreferrer" class="text-indigo-400 hover:underline">Muhammad Mudassar Tabussam</a></p></div></div><div id="file-info-container" class="hidden md:flex items-center space-x-2 text-sm"><span id="fileName" class="text-gray-400"></span><button id="save-config-btn" title="Save dashboard as PDF" class="px-3 py-2 bg-blue-600 hover:bg-blue-700 rounded-md text-white font-semibold">Save PDF</button><button id="export-button" title="Export dashboard as PNG" class="px-3 py-2 bg-green-600 hover:bg-green-700 rounded-md text-white font-semibold">Export PNG</button><button id="reset-button" title="Load a new file" class="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 rounded-md text-white font-semibold">New File</button></div></div></div>`;
+            document.querySelector('footer').innerHTML = `<div class="container mx-auto px-4 text-center text-gray-400 text-sm space-y-1"><p>&copy; ${new Date().getFullYear()} All Rights Reserved.</p><p>Developed by Muhammad Mudassar Tabussam | <a href="https://www.linkedin.com/in/muhammad-mudassar-tabussam-50882416/" target="_blank" rel="noopener noreferrer" class="text-indigo-400 hover:underline">LinkedIn</a></p><p class="text-xs text-gray-500">${new Date().toLocaleDateString(undefined, { weekday:'long',year:'numeric',month:'long',day:'numeric' })}</p></div>`;
+            this.dom.uploadSection.innerHTML = `<div class="w-full max-w-lg"><div class="bg-gray-800 border-2 border-dashed border-gray-600 rounded-xl p-8 text-center"><svg class="mx-auto h-12 w-12 text-gray-500" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg><h2 class="mt-4 text-xl font-semibold">Upload Data File</h2><p class="mt-2 text-sm text-gray-400">Drag & drop or click Excel/CSV.</p><div class="mt-6"><input type="file" id="file-input" class="hidden" accept=".csv,.xlsx,.xls"><label for="file-input" class="file-input-button inline-flex items-center px-5 py-3 rounded-md text-white bg-indigo-600 hover:bg-indigo-700">Select File</label></div></div></div>`;
+            this.dom.loadingSpinner.innerHTML = `<div class="text-center"><div class="spinner ease-linear rounded-full border-4 border-t-4 border-gray-600 h-12 w-12 mb-4 mx-auto"></div><p class="text-lg text-gray-300">Analyzing your data...</p></div>`;
+            this.dom.errorToast.innerHTML = `<div class="flex items-start"><div class="flex-shrink-0"><svg class="h-6 w-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg></div><div class="ml-3"><p class="text-sm font-semibold">An error occurred</p><p id="error-message" class="text-sm mt-1"></p></div><button data-action="close-error-toast" class="ml-auto -mx-1.5 -my-1.5 bg-red-600 text-white hover:bg-red-700 rounded-lg focus:ring-2 focus:ring-red-500 p-1.5 inline-flex h-8 w-8" aria-label="Close">&times;</button></div>`;
+            document.getElementById('file-input').addEventListener('change', e => this.handleFile(e));
+        }
+
+        handleFile(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            this.state.fileName = file.name;
+            this.dom.uploadSection.classList.add('hidden');
+            this.dom.loadingSpinner.classList.remove('hidden');
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                try {
+                    this.workbook = XLSX.read(new Uint8Array(event.target.result), { type: 'array', cellDates: true });
+                    if (this.workbook.SheetNames.length === 0) throw new Error("No sheets found in file.");
+                    const sheets = this.workbook.SheetNames.map((name, index) => ({
+                        name, index, quality: this.analyzeSheetQuality(XLSX.utils.sheet_to_json(this.workbook.Sheets[name], { header: 1 }))
+                    }));
+                    this.showSheetSelector(sheets);
+                } catch (err) { this.showError("Could not read file. Please ensure it's a valid CSV or Excel file."); this.resetApp(); } 
+                finally { this.dom.loadingSpinner.classList.add('hidden'); }
+            };
+            reader.onerror = () => { this.showError("Error reading file."); this.resetApp(); };
+            reader.readAsArrayBuffer(file);
+        }
+
+        analyzeSheetQuality(data) {
+            if (!data || data.length < 2 || data[0].length === 0) return { score: 0, message: "Empty or invalid sheet." };
+            const [rowCount, colCount] = [data.length, data[0].length];
+            const density = (data.flat().filter(c => c !== null && c !== undefined && c !== '').length / (rowCount * colCount)) * 100 || 0;
+            let score = 50 + (rowCount > 10 ? 10 : 0) + (colCount > 2 ? 10 : 0) + (density > 50 ? 30 : 0);
+            return { score: Math.min(100, score), message: `${rowCount} rows, ${colCount} cols, ${density.toFixed(0)}% dense` };
+        }
+
+        showSheetSelector(sheets) {
+            sheets.sort((a, b) => b.quality.score - a.quality.score);
+            this.dom.sheetList.innerHTML = sheets.map(sheet => `
+                <div onclick="handleSheetSelection(${sheet.index})"
+                     class="bg-gray-700/50 hover:bg-gray-600/80 p-4 rounded-lg cursor-pointer border border-gray-600 transition-all duration-200 ease-in-out flex justify-between items-center">
+                    <span class="font-semibold text-lg text-indigo-300 pointer-events-none">${sheet.name}</span>
+                    <span class="text-sm text-gray-300 pointer-events-none">${sheet.quality.message}</span>
+                </div>`
+            ).join('');
+            this.dom.sheetSelectorModal.classList.remove('hidden');
+        }
+
+        processSheetSelection(index) {
+            if (index === undefined || index === null) { this.showError("An internal error occurred."); return; }
+            this.dom.sheetSelectorModal.classList.add('hidden');
+            this.dom.loadingSpinner.classList.remove('hidden');
+            setTimeout(() => {
+                try {
+                    const sheet = this.workbook.Sheets[this.workbook.SheetNames[index]];
+                    const jsonData = XLSX.utils.sheet_to_json(sheet, { defval: null });
+                    if (!jsonData || jsonData.length === 0) throw new Error("Sheet is empty or invalid.");
+                    this.state.rawData = jsonData;
+                    this.state.headers = Object.keys(jsonData[0]);
+                    this.analyzeColumns();
+                    this.state.chartConfigs = []; this.state.globalFilters = [];
+                    this.renderFullDashboard(this.state.fileName);
+                } catch(err) { this.showError("The selected sheet could not be processed."); this.resetApp(); } 
+                finally { this.dom.loadingSpinner.classList.add('hidden'); }
+            }, 50);
+        }
+        
+        analyzeColumns() {
+            this.state.columnInfo = {};
+            this.state.headers.forEach(h => {
+                const unique = new Set(this.state.rawData.map(r => r[h]));
+                let isNum = [...unique].every(v => v === null || v === '' || (typeof v !== 'object' && !isNaN(Number(v))));
+                this.state.columnInfo[h] = { type: isNum && unique.size > 1 ? 'numeric' : 'categorical', uniqueCount: unique.size, uniqueValues: [...unique].sort((a,b) => String(a).localeCompare(String(b))) };
+            });
+        }
+        
+        renderFullDashboard(fileName) {
+            document.getElementById('fileName').textContent = fileName;
+            document.getElementById('file-info-container').classList.remove('hidden');
+            this.dom.dashboardSection.classList.remove('hidden');
+            this.dom.uploadSection.classList.add('hidden');
+            this.renderAllControls();
+            this.updateDashboard();
+            if(this.sortable) this.sortable.destroy();
+            this.sortable = new Sortable(this.dom.chartGrid, { animation: 150, ghostClass: 'sortable-ghost', onEnd: e => this.updateChartOrder(e) });
+        }
+        
+        updateDashboard() {
+            this.state.filteredData = this.state.globalFilters.length === 0 ? this.state.rawData : this.state.rawData.filter(row => this.state.globalFilters.every(f => String(row[f.column]) === String(f.value)));
+            this.renderKPIs();
+            this.dom.chartGrid.innerHTML = '';
+            this.charts = {};
+            this.state.chartConfigs.forEach(config => this.createChartElement(config));
+            this.state.chartConfigs.forEach(config => this.renderSingleChart(config.id));
+        }
+
+        handleControlsChange(e) {
+            const id = e.target.id;
+            if (id === 'global-filter-col') this.updateGlobalFilterValueOptions(e.target.value);
+            if (id === 'chart-type') this.toggleChartControls(e.target.value);
+            if (id === 'analyze-col') this.renderStatsSummary(e.target.value);
+            if (id === 'color-palette') this.updateColorPalette(e.target.value);
+        }
+        
+        handleControlsClick(e) {
+            const action = e.target.dataset.action;
+            if(!action) return;
+            if(action === 'add-chart') this.addChart();
+            if(action === 'add-global-filter') this.addGlobalFilterFromUI();
+            if(action === 'remove-global-filter') this.removeGlobalFilter(e.target.dataset.column, e.target.dataset.value);
+        }
+
+        handleChartGridClick(e) {
+            const target = e.target.closest('[data-action]');
+            if(target) {
+                const action = target.dataset.action;
+                const chartId = target.closest('.chart-card').id;
+                if(action === 'toggle-edit') this.toggleEditMode(chartId);
+                if(action === 'remove-chart') this.removeChart(chartId);
+                if(action.startsWith('update-')) {
+                    const [_, key] = action.split('-');
+                    this.updateChartConfig(chartId, key, target.value);
+                }
+            } else if (e.target.tagName === 'CANVAS') {
+                const chartId = e.target.closest('.chart-card').id;
+                const chart = this.charts[chartId];
+                if (!chart) return;
+                const points = chart.getElementsAtEventForMode(e, 'nearest', { intersect: true }, true);
+                if (points.length) {
+                    const config = this.state.chartConfigs.find(c => c.id === chartId);
+                    if(config.type === 'scatter') return;
+                    // For multi-line labels, find the original flat label
+                    const labelIndex = points[0].index;
+                    let flatLabel;
+                    let currentLabelIndex = 0;
+                    for (const label of chart.data.labels) {
+                        if (Array.isArray(label)) {
+                            if (currentLabelIndex === labelIndex) {
+                                flatLabel = label.join(' ');
+                                break;
+                            }
+                        } else {
+                            if (currentLabelIndex === labelIndex) {
+                                flatLabel = label;
+                                break;
+                            }
+                        }
+                        currentLabelIndex++;
+                    }
+                    if (flatLabel) this.addGlobalFilter(config.dimension, flatLabel);
+                }
+            }
+        }
+
+        renderAllControls() {
+            const numOpts = this.state.headers.filter(h => this.state.columnInfo[h].type === 'numeric').map(h => `<option value="${h}">${h}</option>`).join('');
+            const catOpts = this.state.headers.filter(h => this.state.columnInfo[h].type === 'categorical').map(h => `<option value="${h}">${h}</option>`).join('');
+            this.dom.controlsWrapper.innerHTML = `
+                <div class="space-y-6">
+                    <div><h3 class="text-lg font-semibold mb-2">Global Filters</h3><div id="global-filters-list" class="space-y-2 mb-2"></div><div id="add-filter-controls" class="space-y-2"><select id="global-filter-col" class="w-full bg-gray-700 p-2 rounded">${catOpts.length ? `<option value="">Select filter column...</option>${catOpts}` : '<option>No categorical columns</option>'}</select><div id="global-filter-value-container"></div></div></div>
+                    <div class="pt-6 border-t border-gray-700"><h3 class="text-lg font-semibold mb-2">Add New Chart</h3><div class="space-y-2"><select id="chart-type" class="w-full bg-gray-700 p-2 rounded"><option value="bar">Bar</option><option value="line">Line</option><option value="pie">Pie</option><option value="doughnut">Doughnut</option><option value="scatter">Scatter</option></select><div id="standard-controls"><select id="dimension" class="w-full bg-gray-700 p-2 rounded mt-2"><option value="">Dimension</option>${catOpts}</select><select id="measure" class="w-full bg-gray-700 p-2 rounded mt-2"><option value="">Measure (Count)</option>${numOpts}</select><select id="aggregation" class="w-full bg-gray-700 p-2 rounded mt-2"><option value="sum">Sum</option><option value="average">Average</option><option value="count">Count</option></select></div><div id="scatter-controls" class="hidden"><select id="x-axis" class="w-full bg-gray-700 p-2 rounded mt-2"><option value="">X-Axis</option>${numOpts}</select><select id="y-axis" class="w-full bg-gray-700 p-2 rounded mt-2"><option value="">Y-Axis</option>${numOpts}</select></div><button data-action="add-chart" class="w-full mt-4 px-4 py-2 bg-indigo-600 rounded">Add Chart</button></div></div>
+                    <div class="pt-6 border-t border-gray-700"><h3 class="text-lg font-semibold mb-2">Analyze Column</h3><select id="analyze-col" class="w-full bg-gray-700 p-2 rounded">${numOpts.length ? `<option value="">Select numeric column...</option>${numOpts}`: '<option>No numeric columns</option>'}</select><div id="stats-summary-card" class="mt-2"></div></div>
+                    <div class="pt-6 border-t border-gray-700"><h3 class="text-lg font-semibold mb-2">Settings</h3><label class="block text-sm">Color Palette</label><select id="color-palette" class="w-full bg-gray-700 p-2 rounded"><option value="default">Default</option><option value="cool">Cool</option><option value="warm">Warm</option><option value="pastel">Pastel</option><option value="neon">Neon</option></select></div>
+                </div>`;
+            this.renderGlobalFiltersUI();
+            if (catOpts.length > 0) document.getElementById('global-filter-col').dispatchEvent(new Event('change'));
+        }
+
+        addChart() {
+            const id = `chart-${Date.now()}`;
+            const type = document.getElementById('chart-type').value;
+            let config;
+            if (type === 'scatter') {
+                const xAxis = document.getElementById('x-axis').value, yAxis = document.getElementById('y-axis').value;
+                if (!xAxis || !yAxis) return this.showError('Both X and Y axis must be selected for scatter plots.');
+                config = { id, type, xAxis, yAxis, title: `${yAxis} vs ${xAxis}` };
+            } else {
+                const dimension = document.getElementById('dimension').value;
+                if (!dimension) return this.showError('A dimension must be selected.');
+                const isCrowded = this.state.columnInfo[dimension].uniqueCount > 20;
+                config = { id, type, dimension, measure: document.getElementById('measure').value, aggregation: document.getElementById('aggregation').value, sort: 'desc', topN: isCrowded ? '10' : 'all', title: 'New Chart' };
+            }
+            this.state.chartConfigs.push(config);
+            this.createChartElement(config);
+            this.renderSingleChart(id);
+        }
+
+        removeChart(id) {
+            if (this.charts[id]) { this.charts[id].destroy(); delete this.charts[id]; }
+            this.state.chartConfigs = this.state.chartConfigs.filter(c => c.id !== id);
+            document.getElementById(id)?.remove();
+        }
+
+        createChartElement(config) {
+            const el = document.createElement('div');
+            el.id = config.id;
+            el.className = "bg-gray-800 rounded-xl p-4 shadow-lg flex flex-col chart-card";
+            el.innerHTML = `<div class="flex justify-between items-start gap-2 chart-card-header"><h3 id="${config.id}-title" class="text-md font-semibold text-white mb-2 flex-1 break-all"></h3><div class="flex items-center gap-2"><button data-action="toggle-edit" class="text-gray-500 hover:text-white" title="Edit Chart"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="pointer-events:none;"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button><button data-action="remove-chart" class="text-gray-500 hover:text-white" title="Remove Chart"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="pointer-events:none;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div></div><div id="${config.id}-edit-panel" class="chart-edit-panel border-t border-b border-gray-700 my-2 py-4"></div><div class="chart-container flex-grow" style="overflow-y: hidden;"><canvas id="${config.id}-canvas"></canvas></div><div id="${config.id}-analysis" class="mt-4 pt-4 border-t border-gray-700 text-gray-400 text-xs"></div>`;
+            this.dom.chartGrid.appendChild(el);
+        }
+
+        renderSingleChart(id) {
+            const config = this.state.chartConfigs.find(c => c.id === id); if (!config) return;
+            const { title, data, analysis } = this.getChartDataFromConfig(config);
+            config.title = title; // Update config with dynamic title
+            const titleEl = document.getElementById(`${id}-title`);
+            const analysisEl = document.getElementById(`${id}-analysis`);
+            if(titleEl) titleEl.textContent = title;
+            if(analysisEl) analysisEl.innerHTML = analysis;
+            
+            const container = document.getElementById(id)?.querySelector('.chart-container');
+            if(!container) return;
+            const ctx = document.getElementById(`${id}-canvas`).getContext('2d');
+            if (this.charts[id]) this.charts[id].destroy();
+
+            const options = { responsive: true, maintainAspectRatio: false, plugins: { legend: { display:['pie','doughnut'].includes(config.type), position:'bottom', labels:{color:'#ccc'} }, datalabels: { display: c => ['bar','pie','doughnut'].includes(c.chart.config.type), anchor:'end', align:'end', color:'white', font:{weight:'bold',size:10}, formatter:(v,c) => { if (['pie','doughnut'].includes(c.chart.config.type)) { const sum = c.chart.data.datasets[0].data.reduce((a,b)=>a+b,0); return sum > 0 ? (v*100/sum).toFixed(1)+"%" : "0%"; } return Math.abs(v)>=1e6?(v/1e6).toFixed(1)+'M':Math.abs(v)>=1e3?(v/1e3).toFixed(1)+'K':v; } } } };
+            
+            if (config.type === 'bar' && data.labels.length > 15) {
+                options.indexAxis = 'y'; container.style.height = `${Math.max(350, data.labels.length * 20)}px`;
+            } else { options.indexAxis = 'x'; container.style.height = ``; }
+            
+            this.charts[id] = new Chart(ctx, { type: config.type, data, options });
+        }
+
+        getChartDataFromConfig(config) {
+            let title = '', chartData = {labels: [], datasets: []}, analysis = '';
+            try {
+                if (config.type === 'scatter') {
+                    const points = this.state.filteredData.map(r=>({x:parseFloat(r[config.xAxis]),y:parseFloat(r[config.yAxis])})).filter(p=>!isNaN(p.x)&&!isNaN(p.y));
+                    title = `${config.yAxis} vs ${config.xAxis}`;
+                    chartData = { datasets: [{ label: title, data: points, backgroundColor: this.getColors(1)[0] }] };
+                    
+                    // --- Enhanced Scatter Analysis ---
+                    if (points.length > 1) {
+                        const sumX = points.reduce((a, b) => a + b.x, 0);
+                        const sumY = points.reduce((a, b) => a + b.y, 0);
+                        const avgX = sumX / points.length;
+                        const avgY = sumY / points.length;
+                        const xDiff = points.map(p => p.x - avgX);
+                        const yDiff = points.map(p => p.y - avgY);
+                        const numerator = xDiff.reduce((sum, xd, i) => sum + xd * yDiff[i], 0);
+                        const denominator = Math.sqrt(xDiff.reduce((sum, xd) => sum + xd * xd, 0) * yDiff.reduce((sum, yd) => sum + yd * yd, 0));
+                        const correlation = denominator === 0 ? 0 : numerator / denominator;
+                        let trend = "no clear trend";
+                        if (correlation > 0.5) trend = "a strong positive correlation (as one increases, so does the other)";
+                        else if (correlation > 0.2) trend = "a weak positive correlation";
+                        else if (correlation < -0.5) trend = "a strong negative correlation (as one increases, the other decreases)";
+                        else if (correlation < -0.2) trend = "a weak negative correlation";
+                        analysis = `<p>Visualizes <strong>${points.length} data points</strong> showing ${trend}.</p>`;
+                    } else {
+                         analysis = `<p>Not enough data to determine a correlation between <strong>${config.xAxis}</strong> and <strong>${config.yAxis}</strong>.</p>`;
+                    }
+
+                } else {
+                    let grouped;
+                    if(config.measure) {
+                        const groups = this.state.filteredData.reduce((acc, row) => {
+                            const cat = row[config.dimension] || 'N/A';
+                            const val = parseFloat(row[config.measure]);
+                            if(!isNaN(val)) { acc[cat] = acc[cat] || { total: 0, count: 0 }; acc[cat].total += val; acc[cat].count++; }
+                            return acc;
+                        }, {});
+                        grouped = Object.fromEntries(Object.entries(groups).map(([k,v]) => [k, config.aggregation==='average'?v.total/v.count : config.aggregation==='count'?v.count : v.total]));
+                    } else { grouped = this.state.filteredData.reduce((acc, row) => { const cat = row[config.dimension] || 'N/A'; acc[cat] = (acc[cat] || 0) + 1; return acc; }, {}); }
+
+                    let items = Object.entries(grouped).map(([label, value])=>({label, value}));
+                    items.sort((a,b) => config.sort === 'desc' ? b.value - a.value : a.value - b.value);
+                    if (config.topN !== 'all') items = items.slice(0, parseInt(config.topN));
+
+                    const maxLabelLength = 20;
+                    let labels = items.map(d=>d.label).map(l => {
+                        const s = String(l); return s.length > maxLabelLength ? s.match(new RegExp(`.{1,${maxLabelLength}}`, 'g')) : s;
+                    });
+                    
+                    title = config.measure ? `${config.aggregation} of ${config.measure} by ${config.dimension}` : `Count of ${config.dimension}`;
+                    if (config.topN !== 'all') title = `Top ${config.topN} ` + title;
+                    chartData = { labels, datasets: [{ label: title, data: items.map(d=>d.value), backgroundColor: this.getColors(labels.length) }] };
+                    
+                    // --- Enhanced Descriptive Analysis & Predictions ---
+                    if (items.length > 0) {
+                        const total = items.reduce((sum, item) => sum + item.value, 0);
+                        const average = total / items.length;
+                        const topPerformer = items[0];
+                        const bottomPerformer = items[items.length - 1];
+                        const spread = topPerformer.value - bottomPerformer.value;
+                        const topContribution = total > 0 ? (topPerformer.value / total * 100) : 0;
+                        
+                        let prediction = "Performance is evenly distributed.";
+                        if (items.length > 2) {
+                             if (topContribution > 50) prediction = `<strong>Prediction:</strong> Future results will likely be dominated by the top performer.`;
+                             else if (topContribution > 30) prediction = `<strong>Prediction:</strong> Focus on the top 2-3 categories for the biggest impact.`;
+                        }
+
+                        analysis = `
+                            <ul class="space-y-1 text-gray-400">
+                                <li><strong>Total:</strong> ${total.toLocaleString(undefined, {maximumFractionDigits: 0})}</li>
+                                <li><strong>Average:</strong> ${average.toLocaleString(undefined, {maximumFractionDigits: 0})}</li>
+                                <li><strong>Top Performer:</strong> ${topPerformer.label} (${topPerformer.value.toLocaleString(undefined, {maximumFractionDigits: 0})})</li>
+                                <li><strong>Spread:</strong> Range of ${spread.toLocaleString(undefined, {maximumFractionDigits: 0})} between best and worst.</li>
+                                <li>The top performer accounts for <strong>${topContribution.toFixed(1)}%</strong> of the total.</li>
+                                <li class="text-indigo-300 italic mt-2">${prediction}</li>
+                            </ul>`;
+                    } else {
+                        analysis = '<p>No data to analyze.</p>';
+                    }
+                }
+            } catch (error) { this.showError(`Chart Error: ${error.message}`); }
+            return { title, data: chartData, analysis };
+        }
+        
+        addGlobalFilter(column, value) { if (!this.state.globalFilters.some(f => f.column === column && f.value == value)) { this.state.globalFilters.push({ column, value }); this.renderGlobalFiltersUI(); this.updateDashboard(); } }
+        removeGlobalFilter(column, value) { this.state.globalFilters = this.state.globalFilters.filter(f => !(f.column === column && f.value == value)); this.renderGlobalFiltersUI(); this.updateDashboard(); }
+        renderGlobalFiltersUI() { const list = document.getElementById('global-filters-list'); if(list) list.innerHTML = this.state.globalFilters.map(f => `<div class="flex justify-between items-center bg-gray-700 p-1 rounded text-sm"><span><strong>${f.column}</strong>: ${f.value}</span><button data-action="remove-global-filter" data-column="${f.column}" data-value="${f.value}" class="text-red-400 hover:text-red-300">✖</button></div>`).join(''); }
+        updateGlobalFilterValueOptions(col) { const container = document.getElementById('global-filter-value-container'); if(!container || !col) { if (container) container.innerHTML = ''; return; } const {uniqueValues} = this.state.columnInfo[col]; container.innerHTML=`<div class="flex gap-2 mt-2"><select id="global-filter-val" class="w-full bg-gray-700 p-2 rounded">${uniqueValues.map(v=>`<option value="${v}">${v}</option>`).join('')}</select><button data-action="add-global-filter" class="px-4 bg-indigo-600 rounded">Add</button></div>`; }
+        addGlobalFilterFromUI() { const col = document.getElementById('global-filter-col').value; const val = document.getElementById('global-filter-val')?.value; if (col && val) this.addGlobalFilter(col, val); else this.showError("Please select a column and value to filter.", "info");}
+        renderKPIs() { if (!this.dom.kpiContainer) return; const num = this.state.headers.filter(h=>this.state.columnInfo[h].type==='numeric').length; this.dom.kpiContainer.innerHTML = [{t:'Total Rows',v:this.state.filteredData.length},{t:'Columns',v:this.state.headers.length},{t:'Numeric Fields',v:num},{t:'Categorical Fields',v:this.state.headers.length-num}].map(k=>`<div class="bg-gray-800 rounded-xl p-4"><h3 class="text-sm text-gray-400">${k.t}</h3><p class="text-3xl font-semibold">${k.v.toLocaleString()}</p></div>`).join(''); }
+        
+        toggleEditMode(id) { const panel = document.getElementById(`${id}-edit-panel`); if(panel) { panel.classList.toggle('open'); panel.innerHTML = panel.classList.contains('open') ? this.generateEditPanelHTML(id) : ''; } }
+        
+        generateEditPanelHTML(id) {
+            const config = this.state.chartConfigs.find(c => c.id === id); if (!config) return '';
+            const typeOpts = ['bar', 'line', 'pie', 'doughnut', 'scatter'].map(t => `<option value="${t}" ${config.type === t ? 'selected' : ''}>${t.charAt(0).toUpperCase() + t.slice(1)}</option>`).join('');
+            if (config.type === 'scatter') {
+                const numHeaders = this.state.headers.filter(h => this.state.columnInfo[h].type === 'numeric');
+                const xAxisOpts = numHeaders.map(h => `<option value="${h}" ${config.xAxis === h ? 'selected' : ''}>${h}</option>`).join('');
+                const yAxisOpts = numHeaders.map(h => `<option value="${h}" ${config.yAxis === h ? 'selected' : ''}>${h}</option>`).join('');
+                return `<div class="grid grid-cols-2 gap-2 text-sm"><div><label>Type</label><select data-action="update-type" class="w-full bg-gray-600 p-1 rounded">${typeOpts}</select></div><div></div><div><label>X-Axis</label><select data-action="update-xAxis" class="w-full bg-gray-600 p-1 rounded">${xAxisOpts}</select></div><div><label>Y-Axis</label><select data-action="update-yAxis" class="w-full bg-gray-600 p-1 rounded">${yAxisOpts}</select></div></div>`;
+            }
+            const numOpts = this.state.headers.filter(h => this.state.columnInfo[h].type === 'numeric').map(h => `<option value="${h}" ${config.measure === h ? 'selected' : ''}>${h}</option>`).join('');
+            const catOpts = this.state.headers.filter(h => this.state.columnInfo[h].type === 'categorical').map(h => `<option value="${h}" ${config.dimension === h ? 'selected' : ''}>${h}</option>`).join('');
+            const aggOpts = ['sum', 'average', 'count'].map(a => `<option value="${a}" ${config.aggregation === a ? 'selected' : ''}>${a}</option>`).join('');
+            const sortOpts = ['desc', 'asc'].map(s => `<option value="${s}" ${config.sort === s ? 'selected' : ''}>${s}</option>`).join('');
+            const topNOpts = ['all', '5', '10', '20'].map(n => `<option value="${n}" ${config.topN === n ? 'selected' : ''}>${n === 'all' ? 'All' : `Top ${n}`}</option>`).join('');
+            return `<div class="grid grid-cols-2 gap-2 text-sm"><div><label>Type</label><select data-action="update-type" class="w-full bg-gray-600 p-1 rounded">${typeOpts}</select></div><div><label>Dimension</label><select data-action="update-dimension" class="w-full bg-gray-600 p-1 rounded">${catOpts}</select></div><div><label>Measure</label><select data-action="update-measure" class="w-full bg-gray-600 p-1 rounded"><option value="">Count</option>${numOpts}</select></div><div><label>Aggregation</label><select data-action="update-aggregation" class="w-full bg-gray-600 p-1 rounded" ${config.measure ? '' : 'disabled'}>${aggOpts}</select></div><div><label>Sort</label><select data-action="update-sort" class="w-full bg-gray-600 p-1 rounded">${sortOpts}</select></div><div><label>Show</label><select data-action="update-topN" class="w-full bg-gray-600 p-1 rounded">${topNOpts}</select></div></div>`;
+        }
+        
+        updateChartConfig(id, key, value) {
+            const index = this.state.chartConfigs.findIndex(c => c.id === id); if (index === -1) return;
+            const oldConfig = { ...this.state.chartConfigs[index] };
+            let newConfig = { ...oldConfig, [key]: value };
+            if (key === 'type' && value !== oldConfig.type) {
+                if (value === 'scatter') {
+                    const numerics = this.state.headers.filter(h => this.state.columnInfo[h].type === 'numeric');
+                    newConfig = { id, type: 'scatter', xAxis: oldConfig.xAxis || numerics[0] || '', yAxis: oldConfig.yAxis || numerics[1] || numerics[0] || '' };
+                } else if (oldConfig.type === 'scatter') {
+                    const categoricals = this.state.headers.filter(h => this.state.columnInfo[h].type === 'categorical');
+                    newConfig = { id, type: value, dimension: oldConfig.dimension || categoricals[0] || '', measure: '', aggregation: 'sum', sort: 'desc', topN: 'all' };
+                }
+            }
+            if (key === 'measure' && !value) newConfig.aggregation = 'count';
+            this.state.chartConfigs[index] = newConfig;
+            if (key === 'type' && value !== oldConfig.type) {
+                const panel = document.getElementById(`${id}-edit-panel`);
+                if(panel && panel.classList.contains('open')) panel.innerHTML = this.generateEditPanelHTML(id);
+            }
+            this.renderSingleChart(id);
+        }
+
+        getColors(count) {
+            const palettes = { default: ['#4f46e5','#10b981','#f59e0b','#ef4444','#3b82f6','#8b5cf6'], cool: ['#3b82f6','#60a5fa','#34d399','#a78bfa','#22d3ee','#818cf8'], warm: ['#f59e0b','#f97316','#ef4444','#eab308','#dc2626','#d97706'], pastel: ['#a78bfa','#f472b6','#60a5fa','#818cf8','#fb923c','#4ade80'], neon: ['#39ff14','#ff1493','#14fff7','#f0ff00','#ff00ff','#00ffff'] };
+            const p = palettes[this.state.currentColorPalette] || palettes.default;
+            return Array.from({ length: count }, (_, i) => p[i % p.length]);
+        }
+
+        updateColorPalette(name) { this.state.currentColorPalette=name; this.updateDashboard(); }
+        updateChartOrder(e) { const item = this.state.chartConfigs.splice(e.oldIndex, 1)[0]; this.state.chartConfigs.splice(e.newIndex, 0, item); }
+        renderStatsSummary(col) { const card = document.getElementById('stats-summary-card'); if (!col || !card) { if (card) card.innerHTML=''; return; } const values=this.state.filteredData.map(r=>parseFloat(r[col])).filter(v=>!isNaN(v)); if(values.length === 0) { card.innerHTML = '<div class="bg-gray-700 p-2 rounded mt-2 text-sm">No numeric data.</div>'; return; } const sum=values.reduce((a,b)=>a+b,0), mean=(sum/values.length).toLocaleString(undefined, {maximumFractionDigits:2}); values.sort((a,b)=>a-b); const median=(values.length%2===0 ? (values[values.length/2-1]+values[values.length/2])/2 : values[Math.floor(values.length/2)]).toLocaleString(undefined, {maximumFractionDigits:2}); card.innerHTML=`<div class="bg-gray-700 p-2 rounded mt-2 text-sm space-y-1"><div><strong>Mean:</strong> ${mean}</div><div><strong>Median:</strong> ${median}</div><div><strong>Min:</strong> ${Math.min(...values).toLocaleString()}</div><div><strong>Max:</strong> ${Math.max(...values).toLocaleString()}</div></div>`; }
+        
+        async exportDashboard(format) {
+             const main = document.getElementById('main-content');
+             main.classList.add('exporting');
+             this.showError("Preparing export...", "info");
+             await new Promise(r => setTimeout(r, 500));
+            try {
+                const canvas = await html2canvas(main, { backgroundColor: '#111827', scale: 1.5 });
+                const link = document.createElement('a');
+                link.download = `dashboard-${this.state.fileName}.${format}`;
+                if (format === 'png') link.href = canvas.toDataURL('image/png');
+                else {
+                    const { jsPDF } = window.jspdf;
+                    const pdf = new jsPDF({ orientation: 'l', unit: 'px', format: [canvas.width, canvas.height] });
+                    pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, 0, canvas.width, canvas.height);
+                    link.href = pdf.output('bloburl');
+                }
+                link.click();
+            } catch (err) { this.showError("Failed to export dashboard."); console.error(err); } 
+            finally { 
+                main.classList.remove('exporting'); 
+                this.dom.errorToast.classList.add('hidden'); 
+            }
+        }
+
+        showError(msg, type = 'error') {
+            const toast = this.dom.errorToast;
+            toast.querySelector('#error-message').textContent = msg;
+            toast.classList.remove('bg-red-600','bg-blue-600','hidden','opacity-0');
+            toast.classList.add(type === 'error' ? 'bg-red-600' : 'bg-blue-600');
+            if (type === 'error') setTimeout(() => { toast.classList.add('opacity-0'); setTimeout(() => toast.classList.add('hidden'), 300); }, 5000);
+        }
+        
+        toggleChartControls(type) { document.getElementById('standard-controls').classList.toggle('hidden',type==='scatter'); document.getElementById('scatter-controls').classList.toggle('hidden',type!=='scatter'); }
+        resetApp() { window.location.reload(); }
+    }
+    </script>
+</body>
+</html>
+
+
+
